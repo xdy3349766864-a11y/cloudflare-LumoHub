@@ -1,6 +1,7 @@
-// Cloudflare R2 图片管理系统 - 随机图片接口增强版 (修复语法错误)
+// Cloudflare R2 图床 - 随机图片接口
 export default {
   async fetch(request, env, ctx) {
+    // 统一返回 JSON 的辅助函数
     const sendJSON = (data, status = 200) => {
       return new Response(JSON.stringify(data), {
         status,
@@ -16,6 +17,7 @@ export default {
       });
     };
 
+    // 处理 OPTIONS 预检请求
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
@@ -28,6 +30,7 @@ export default {
     }
 
     try {
+      // 检查必要的环境变量
       if (!env.MY_BUCKET) return sendJSON({ ok: false, msg: "存储桶未配置" }, 500);
       if (!env.R2_ADMIN_USER || !env.R2_ADMIN_PASS || !env.JWT_SECRET || !env.KV)
         return sendJSON({ ok: false, msg: "环境变量未配置" }, 500);
@@ -35,12 +38,15 @@ export default {
       const url = new URL(request.url);
       const path = url.pathname;
 
+      // 安全解码路径，防止目录遍历
       const safeDecodeKey = (key) => {
         try {
           let k = decodeURIComponent(key);
+          // 简单的安全检查
           if (k.includes("../") || k.includes("..\\")) return "";
           k = k.replace(/\\/g, "/").replace(/\/+/g, "/");
           if (k.startsWith("/")) k = k.slice(1);
+          // 过滤掉 . 和 ..
           const parts = k.split("/").filter(p => p && p !== "." && p !== "..");
           return parts.join("/").slice(0, 150);
         } catch {
@@ -48,9 +54,9 @@ export default {
         }
       };
 
-      // ====================== 增强版：随机图片接口 /random ======================
+      // ====================== 随机图片接口 /random ======================
       if (path === "/random" && request.method === "GET") {
-        // ---------------------- 限制 1: Referer 防盗链 ----------------------
+        // 1. Referer 防盗链检查
         const referer = request.headers.get("Referer");
         const allowedReferers = env.ALLOWED_REFERERS ? env.ALLOWED_REFERERS.split(",").map(r => r.trim()) : [];
         
@@ -64,7 +70,7 @@ export default {
           }
         }
 
-        // ---------------------- 限制 2: 访问频率限制 ----------------------
+        // 2. 简单的访问频率限制
         const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
         const MAX_REQ = parseInt(env.RATE_LIMIT_MAX) || 20;
         const TIME_WINDOW = parseInt(env.RATE_LIMIT_WINDOW) || 60;
@@ -82,24 +88,27 @@ export default {
             } 
           });
         }
+        // 异步更新计数，不等待
         env.KV.put(rateKey, (count + 1).toString(), { expirationTtl: TIME_WINDOW }).catch(() => {});
 
-        // ---------------------- 限制 3: 指定目录随机 ----------------------
+        // 3. 支持指定目录
         const targetDir = url.searchParams.get("dir");
         const format = url.searchParams.get("format")?.toLowerCase();
 
-        // 递归获取所有文件
+        // 列出所有文件（简单的分页处理）
         let allObjects = [];
         let cursor = undefined;
         do {
           const listResult = await env.MY_BUCKET.list({ cursor, limit: 1000 });
           let filtered = listResult.objects;
           
+          // 如果指定了目录，进行过滤
           if (targetDir) {
             const dirPrefix = targetDir.endsWith("/") ? targetDir : `${targetDir}/`;
             filtered = filtered.filter(obj => obj.key.startsWith(dirPrefix));
           }
           
+          // 只保留图片文件
           filtered = filtered.filter(obj => /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(obj.key));
           
           allObjects = allObjects.concat(filtered);
@@ -113,7 +122,7 @@ export default {
           });
         }
 
-        // 随机抽取
+        // 随机选一张
         const randomObject = allObjects[Math.floor(Math.random() * allObjects.length)];
         const imageObj = await env.MY_BUCKET.get(randomObject.key);
 
@@ -134,7 +143,7 @@ export default {
           });
         }
 
-        // 默认返回图片流
+        // 默认直接返回图片
         return new Response(imageObj.body, {
           headers: {
             "Content-Type": imageObj.httpMetadata?.contentType || "image/webp",
@@ -145,6 +154,7 @@ export default {
         });
       }
 
+      // 首页 - 管理界面
       if (path === "/") {
         return new Response(getFrontendHtml(), {
           headers: {
@@ -154,6 +164,7 @@ export default {
         });
       }
 
+      // 直接访问图片文件
       if (request.method === "GET" && !["/login", "/list", "/delete", "/logout", "/random"].includes(path)) {
         const objectKey = safeDecodeKey(path.slice(1));
         if (!objectKey) return sendJSON({ ok: false, msg: "非法路径" }, 403);
@@ -171,7 +182,9 @@ export default {
         });
       }
 
+      // 登录接口
       if (path === "/login" && request.method === "POST") {
+        // 简单的登录频率限制
         const clientIP = request.headers.get("CF-Connecting-IP") || "unknown";
         const failKey = `login_fail:${clientIP}`;
         const failCount = parseInt(await env.KV.get(failKey) || "0");
@@ -181,29 +194,34 @@ export default {
         }
 
         const body = await request.json().catch(() => ({}));
+        // 简单的延迟，防止暴力破解
         await new Promise(r => setTimeout(r, 300));
         
         if (body.user === env.R2_ADMIN_USER && body.pass === env.R2_ADMIN_PASS) {
+          // 登录成功，清除失败记录
           await env.KV.delete(failKey);
           const payload = {
             sub: "admin",
             jti: crypto.randomUUID(),
             iat: Math.floor(Date.now() / 1000),
-            exp: Math.floor(Date.now() / 1000) + 3600 * 24
+            exp: Math.floor(Date.now() / 1000) + 3600 * 24 // 24小时过期
           };
           const token = await signJWT(payload, env.JWT_SECRET);
           return sendJSON({ ok: true, token });
         } else {
+          // 记录失败次数
           await env.KV.put(failKey, failCount + 1, { expirationTtl: 600 });
           return sendJSON({ ok: false, msg: "账号或密码错误" }, 401);
         }
       }
 
+      // 退出登录
       if (path === "/logout" && request.method === "POST") {
         const token = request.headers.get("Authorization")?.replace("Bearer ", "") || "";
         if (token) {
           try {
             const payload = await verifyJWT(token, env.JWT_SECRET);
+            // 将 token 加入黑名单
             const exp = payload.exp - Math.floor(Date.now() / 1000);
             if (exp > 0) await env.KV.put(`blacklist:${token}`, "1", { expirationTtl: exp });
           } catch {}
@@ -211,9 +229,11 @@ export default {
         return sendJSON({ ok: true });
       }
 
+      // 以下接口需要认证
       const token = request.headers.get("Authorization")?.replace("Bearer ", "") || "";
       let user = null;
       try {
+        // 检查是否在黑名单
         const isBlacklisted = await env.KV.get(`blacklist:${token}`);
         if (isBlacklisted) throw new Error("token已注销");
         const payload = await verifyJWT(token, env.JWT_SECRET);
@@ -221,6 +241,7 @@ export default {
       } catch {}
       if (!user) return sendJSON({ ok: false, msg: "未授权" }, 401);
 
+      // 上传图片
       if (request.method === "PUT" && path !== "/") {
         const fileName = safeDecodeKey(path.slice(1));
         if (!fileName) return sendJSON({ ok: false, msg: "非法文件名" }, 403);
@@ -236,6 +257,7 @@ export default {
         return sendJSON({ ok: true, url: `${url.origin}/${encodeURIComponent(fileName)}` });
       }
 
+      // 图片列表
       if (path === "/list" && request.method === "GET") {
         const limit = Math.min(parseInt(url.searchParams.get("limit")) || 20, 100);
         const cursor = url.searchParams.get("cursor") || undefined;
@@ -244,12 +266,14 @@ export default {
         
         const listResult = await env.MY_BUCKET.list({ limit, cursor });
         
+        // 简单排序
         let sortedList = [...listResult.objects];
         sortedList.sort((a, b) => {
           let cmp = 0;
           if (sortBy === "name") cmp = a.key.localeCompare(b.key);
           if (sortBy === "size") cmp = a.size - b.size;
           if (sortBy === "time") {
+            // 从文件名提取时间戳排序 (假设格式是 img_20231001120000_1234.webp)
             const timeA = a.key.match(/img_(\d+)_/)?.[1] || "0";
             const timeB = b.key.match(/img_(\d+)_/)?.[1] || "0";
             cmp = timeA.localeCompare(timeB);
@@ -269,6 +293,7 @@ export default {
         });
       }
 
+      // 删除图片
       if (path === "/delete" && request.method === "POST") {
         const body = await request.json().catch(() => ({}));
         const name = safeDecodeKey(body.name);
@@ -286,6 +311,7 @@ export default {
   }
 };
 
+// 简单的 JWT 签名
 async function signJWT(payload, secret) {
   const enc = s => btoa(JSON.stringify(s)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
   const h = enc({ alg: "HS256", typ: "JWT" });
@@ -299,6 +325,7 @@ async function signJWT(payload, secret) {
   return `${h}.${p}.${sig}`;
 }
 
+// 简单的 JWT 验证
 async function verifyJWT(token, secret) {
   const [h, p, sig] = token.split(".");
   if (!h || !p || !sig) throw new Error("无效Token");
@@ -315,6 +342,7 @@ async function verifyJWT(token, secret) {
   return payload;
 }
 
+// 前端 HTML
 function getFrontendHtml() {
   return `<!DOCTYPE html>
 <html lang="zh-CN">
