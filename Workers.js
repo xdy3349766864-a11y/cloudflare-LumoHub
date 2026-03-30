@@ -349,7 +349,7 @@ function getFrontendHtml() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>图片存储器</title>
+  <title>LumoHub</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+SC:wght@400;500&display=swap');
@@ -383,7 +383,7 @@ function getFrontendHtml() {
           <div class="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center text-4xl">📸</div>
         </div>
         <h1 class="text-3xl font-semibold text-center text-gray-900 mb-1">图片存储器</h1>
-        <p class="text-center text-gray-500 mb-8 text-sm">Cloudflare R2 · WebP 智能压缩</p>
+        <p class="text-center text-gray-500 mb-8 text-sm">欢迎进入影像实验室</p>
         <div class="space-y-4">
           <div>
             <label class="block text-xs font-semibold text-gray-400 uppercase mb-1 ml-1">用户名</label>
@@ -408,8 +408,8 @@ function getFrontendHtml() {
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center text-xl">📸</div>
           <div class="hidden sm:block">
-            <h1 class="text-xl font-bold text-gray-900">R2 Storage</h1>
-            <p class="text-[10px] text-gray-400 uppercase tracking-widest mt-1">Professional Cloud Storage</p>
+            <h1 class="text-xl font-bold text-gray-900">LumoHub</h1>
+            <p class="text-[10px] text-gray-400 uppercase tracking-widest mt-1">欢迎进入影像实验室</p>
           </div>
         </div>
         <button onclick="logout()" class="flex items-center gap-2 px-4 py-2 hover:bg-red-50 rounded-xl text-sm font-medium text-gray-600 hover:text-red-600">
